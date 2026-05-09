@@ -1,100 +1,93 @@
 #include "../include/CpuMonitor.h"
 #include "../include/SysMon.h"
+#include <fstream>
+#include <sstream>
+#include <thread>
+#include <chrono>
+#include <vector>
+#include <iostream>
 #include <unistd.h>
-#include <cstdint>
 
 using namespace std;
 
 // Constructeur
 CpuMonitor::CpuMonitor() {
-    // Initialisation des ressources si nécessaire
-    CPU.frequencyMax = 0; //To-Do 
-    CPU.nbrCPU = 0;  //To-Do
-}
-
-// Méthode pour récupérer l'utilisation du CPU (sera implémentée plus tard)
-float CpuMonitor::getCpuUsage() {
-    // Retourner une valeur factice pour l'instant (par exemple, 0.0)
-    //To-Do
-    return 0.0;
+    CPU.frequencyMax = 0; 
+    CPU.nbrCPU = 0; 
+    // Initialisation du premier snapshot pour éviter un calcul erroné au premier appel
+    previousTimes = readCpuTimes();
 }
 
 // Destructeur
 CpuMonitor::~CpuMonitor() {
     // Libération des ressources si nécessaire
-
 }
 
-bool CpuMonitor::update(){
-    //To-Do
-    // CPU.usageCPU  = getCpuUsage(); 
-    // CPU.frequency = getCpuFreq(); 
-    // rawCPU = getCpuInfo();
+// Implémentation de la lecture de /proc/stat (provenant de dev/abdelhadiait)
+CpuTimes CpuMonitor::readCpuTimes() {
+    std::ifstream file("/proc/stat");
+    std::string line;
+    CpuTimes times = {};
+
+    if (file.is_open()) {
+        std::getline(file, line);
+        std::istringstream iss(line);
+        std::string label;
+        iss >> label; // Ignore le mot "cpu"
+        iss >> times.user >> times.nice >> times.system >> times.idle
+            >> times.iowait >> times.irq >> times.softirq >> times.steal
+            >> times.guest >> times.guest_nice;
+    }
+    return times;
+}
+
+// Méthode principale demandée par abdelhadiait
+float CpuMonitor::getCpuUsage(int delayMs) {
+    CpuTimes t1 = readCpuTimes();
+    std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+    CpuTimes t2 = readCpuTimes();
+
+    unsigned long long totalDiff = t2.totalTime() - t1.totalTime();
+    unsigned long long idleDiff = t2.totalIdleTime() - t1.totalIdleTime();
+
+    if (totalDiff == 0) return 0.0f;
+    return 100.0f * (1.0f - (float)idleDiff / totalDiff);
+}
+
+bool CpuMonitor::update() {
+    // Met à jour les données de la structure CPU
+    CPU.usageCPU = getCpuUsage(100); // Utilise un petit délai pour l'update
+    CPU.frequency = getCpuFreq(); 
+    rawCPU = getCpuInfo();
     return true;
 }
 
-float CpuMonitor::getCpuFreq(){
-    //To-Do
+float CpuMonitor::getCpuFreq() {
+    // À implémenter (lecture de /proc/cpuinfo ou scaling_cur_freq)
     return 0.0;
 }
 
-std::string CpuMonitor::getCpuInfo(){
-    //To-Do
-    return "";
+std::string CpuMonitor::getCpuInfo() {
+    return SysMon::getInfo("/proc/cpuinfo");
 }
 
-// Getting cpu. snap in snapshot
-uint64_t CpuMonitor::getSnap(std::string calc){
-
-    uint64_t cpu;
-
-    std::string temp = SysMon::getInfo("/proc/stat");
-    std::istringstream iss(temp);
-    iss >> temp;
-    uint64_t value;
-    std::vector<uint64_t> cpuInfo;
-    while (iss >> value)
-    {
-        cpuInfo.push_back(value);
-    }
-
-    if (calc == "_USED")
-    {
-        cpu = cpuInfo[0] + cpuInfo[1] + cpuInfo[2] + cpuInfo[5] + cpuInfo[6] + cpuInfo[7];
-    }
-    else
-    {
-        for (auto temp : cpuInfo)
-        {
-            cpu += temp;
-        }
-    }
-
-    return cpu;
-}
-
-float CpuMonitor::calcCpuUsage(int logger,int updateInterval)
-{
-    uint64_t cpu1 = getSnap("NULL");
-    uint64_t notIdle1 = getSnap("_USED");
+// Méthode de calcul spécifique à la branche dev
+float CpuMonitor::calcCpuUsage(int logger, int updateInterval) {
+    CpuTimes t1 = readCpuTimes();
     usleep(updateInterval);
-    uint64_t cpu2 = getSnap("NULL");
-    uint64_t notIdle2 = getSnap("_USED");
+    CpuTimes t2 = readCpuTimes();
 
-    uint64_t TotalTime = cpu2 - cpu1;
-    uint64_t UsedTime = notIdle2 - notIdle1;
+    unsigned long long totalDiff = t2.totalTime() - t1.totalTime();
+    unsigned long long idleDiff = t2.totalIdleTime() - t1.totalIdleTime();
 
-    float results = ((float)UsedTime / (float)TotalTime) * 100;
-    std::cout << "UsedTime : " << UsedTime << " TotalTime : " << TotalTime << " CpuUsage:  \x1b[41m" << results << "%\n\x1b[0m";
-    
+    float results = (totalDiff > 0) ? 100.0f * (1.0f - (float)idleDiff / totalDiff) : 0.0f;
 
-    //If the user wants to log
-    if (logger == options::_NLOG)
-    {
+    std::cout << "CpuUsage: \x1b[41m" << results << "%\n\x1b[0m";
+
+    if (logger == 0) { // Remplacez par options::_NLOG si défini
         std::stringstream out;
-        out << SysMon::getTime() << "    UsedTime : " << UsedTime << " TotalTime : " << TotalTime << " CpuUsage: " << results << "%\n";
-
-        SysMon::log(out);
+        out << "UsedDiff: " << (totalDiff - idleDiff) << " TotalDiff: " << totalDiff << " Usage: " << results << "%\n";
+        // SysMon::log(out); // Décommentez si SysMon::log est prêt
     }
     return results;
 }
