@@ -1,0 +1,44 @@
+name: C++ CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/*.hpp'
+  push:
+    branches:
+      - dev
+    paths:
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/*.hpp'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up CMakeAdd commentMore actions
+        uses: actions/setup-cmake@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+      - name: Install g++
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++
+      - name: Debug PATH and compilers
+        run: |
+          which g++
+          g++ --version || echo "g++ not found"
+      - name: Syntax check
+        run: |
+          for file in $(find . -type f \( -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \)); do
+            echo "Checking syntax: $file"
+            g++ -fsyntax-only "$file"
+          done
